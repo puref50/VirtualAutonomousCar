@@ -34,6 +34,7 @@ class CarEnv(gymnasium.Env):
 
         self.client = carla.Client("localhost", 2000)
         self.client.set_timeout(4.0)
+        self.client.load_world('Town10HD')
         self.world = self.client.get_world()
         self.settings = self.world.get_settings()
         self.settings.no_rendering_mode = not self.SHOW_CAM
@@ -104,7 +105,7 @@ class CarEnv(gymnasium.Env):
         # Reward function for collision, lane invasion and steering lock
         reward, done = 0, False
         if self.collision_hist:
-            done, reward = False, -300
+            done, reward = True, -300
         elif self.lane_invade_hist:
             done, reward = False, -300
         elif lock_duration > 3:
@@ -133,12 +134,24 @@ class CarEnv(gymnasium.Env):
 
         reward += 0.1
 
+        self.episode_total_reward += reward
+        cur_dist = self.initial_location.distance(self.vehicle.get_location())
+        self.episode_total_distance = cur_dist
+        self.episode_lane_invasion_count += len(self.lane_invade_hist)
+        self.lane_invade_hist = [] 
+
         if self.episode_start + SECONDS_PER_EPISODE < time.time():
             done = True
             self.cleanup()
 
         self.image_for_CNN = self.apply_cnn(cam[self.height_from:, self.width_from:self.width_to])
-        return self.image_for_CNN, reward, done, done, {}
+
+        info = {
+			"episode_reward": self.episode_total_reward,
+			"episode_distance": self.episode_total_distance,
+			"lane_invasions": self.episode_lane_invasion_count
+		}
+        return self.image_for_CNN, reward, done, done, info
 
     def reset(self, seed=SEED):
         # Delete people and other vehicles
@@ -149,6 +162,10 @@ class CarEnv(gymnasium.Env):
         
         self.collision_hist, self.lane_invade_hist, self.actor_list = [], [], []
         self.transform = random.choice(self.world.get_map().get_spawn_points())
+
+        self.episode_total_reward = 0
+        self.episode_total_distance = 0
+        self.episode_lane_invasion_count = 0
 
         self.vehicle = None
         while self.vehicle is None:
